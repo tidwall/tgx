@@ -1,0 +1,4 @@
+.vscode/
+deps/
+*.dSYM/
+a.out
