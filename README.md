@@ -1,6 +1,6 @@
 # tgx
 
-Extention for the [TG](https://github.com/tidwall/tg) geometry library.
+Extensions for the [TG](https://github.com/tidwall/tg) geometry library.
 
 Includes a bridge for converting geometries to/from the [GEOS](https://github.com/libgeos/geos) library and simple a utility for projecting geometries from lat/lon (spherical)
 to cartesian coordinates using a meters grid.
