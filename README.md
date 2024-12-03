@@ -44,3 +44,7 @@ tg_geom_free(tg_meters);
 tg_geom_free(tg_geom);
 tg_geom_free(tg_final);
 ```
+
+<img width="635" alt="image" src="https://github.com/user-attachments/assets/e522b252-4106-4c9e-881f-b236accf035c">
+
+
