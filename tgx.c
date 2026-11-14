@@ -26,15 +26,10 @@ static GEOSGeometry *tg_ring_to_geos(GEOSContextHandle_t handle,
 {
     unsigned int npoints = (unsigned int)tg_ring_num_points(ring);
     const struct tg_point *points = tg_ring_points(ring);
-    GEOSCoordSequence *seq = GEOSCoordSeq_create_r(handle, npoints, 2);
+    GEOSCoordSequence *seq = GEOSCoordSeq_copyFromBuffer_r(handle,
+        (const double*)points, npoints, 0, 0);
     if (!seq) {
         return 0;
-    }
-    for (unsigned int i = 0; i < npoints; i++) {
-        if (!GEOSCoordSeq_setXY_r(handle, seq, i, points[i].x, points[i].y)) {
-            GEOSCoordSeq_destroy_r(handle, seq);
-            return 0;
-        }
     }
     GEOSGeometry *geom = 0;
     if (isline) {
