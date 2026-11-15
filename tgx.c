@@ -105,6 +105,79 @@ static GEOSGeometry *tg_poly_to_geos(GEOSContextHandle_t handle,
     return geom;
 }
 
+static GEOSGeometry *tg_collection_to_geos(GEOSContextHandle_t handle,
+    const struct tg_geom *geom, int geos_type)
+{
+    int type = tg_geom_typeof(geom);
+    int ngeoms;
+    GEOSGeometry **geoms;
+    GEOSGeometry *collection;
+
+    switch (type) {
+    case TG_MULTIPOINT:
+        ngeoms = tg_geom_num_points(geom);
+        break;
+    case TG_MULTILINESTRING:
+        ngeoms = tg_geom_num_lines(geom);
+        break;
+    case TG_MULTIPOLYGON:
+        ngeoms = tg_geom_num_polys(geom);
+        break;
+    case TG_GEOMETRYCOLLECTION:
+        ngeoms = tg_geom_num_geometries(geom);
+        break;
+    default:
+        return 0;
+    }
+    if (ngeoms <= 0 ||
+        (size_t)ngeoms > (size_t)-1 / sizeof(GEOSGeometry*))
+    {
+        return 0;
+    }
+    geoms = tg_malloc((size_t)ngeoms * sizeof(GEOSGeometry*));
+    if (!geoms) {
+        return 0;
+    }
+
+    int i = 0;
+    for (; i < ngeoms; i++) {
+        switch (type) {
+        case TG_MULTIPOINT:
+            geoms[i] = tg_point_to_geos(handle, tg_geom_point_at(geom, i));
+            break;
+        case TG_MULTILINESTRING:
+            geoms[i] = tg_line_to_geos(handle, tg_geom_line_at(geom, i));
+            break;
+        case TG_MULTIPOLYGON:
+            geoms[i] = tg_poly_to_geos(handle, tg_geom_poly_at(geom, i));
+            break;
+        default:
+            geoms[i] = tg_geom_to_geos(handle, tg_geom_geometry_at(geom, i));
+            break;
+        }
+        if (!geoms[i]) {
+            break;
+        }
+    }
+    if (i != ngeoms) {
+        for (int j = 0; j < i; j++) {
+            GEOSGeom_destroy_r(handle, geoms[j]);
+        }
+        tg_free(geoms);
+        return 0;
+    }
+
+    collection = GEOSGeom_createCollection_r(
+        handle, geos_type, geoms, (unsigned int)ngeoms);
+    if (!collection) {
+        for (int j = 0; j < ngeoms; j++) {
+            GEOSGeom_destroy_r(handle, geoms[j]);
+        }
+    }
+    tg_free(geoms);
+    return collection;
+}
+
 /// Convert a GEOS geometry to a TG geometry
 GEOSGeometry *tg_geom_to_geos(GEOSContextHandle_t handle,
     const struct tg_geom *geom)
@@ -121,6 +194,14 @@ GEOSGeometry *tg_geom_to_geos(GEOSContextHandle_t handle,
             return tg_line_to_geos(handle, tg_geom_line(geom));
         case TG_POLYGON:
             return tg_poly_to_geos(handle, tg_geom_poly(geom));
+        case TG_MULTIPOINT:
+            return tg_collection_to_geos(handle, geom, GEOS_MULTIPOINT);
+        case TG_MULTILINESTRING:
+            return tg_collection_to_geos(handle, geom, GEOS_MULTILINESTRING);
+        case TG_MULTIPOLYGON:
+            return tg_collection_to_geos(handle, geom, GEOS_MULTIPOLYGON);
+        case TG_GEOMETRYCOLLECTION:
+            return tg_collection_to_geos(handle, geom, GEOS_GEOMETRYCOLLECTION);
         default:
             break;
         }
@@ -150,7 +231,7 @@ static struct tg_geom *tg_point_from_geos(GEOSContextHandle_t handle,
     GEOSGeometry *geom)
 {
     double x, y;
-    if (GEOSGeomGetX_r(handle, geom, &x) && GEOSGeomGetX_r(handle, geom, &y)) {
+    if (GEOSGeomGetX_r(handle, geom, &x) && GEOSGeomGetY_r(handle, geom, &y)) {
         return tg_geom_new_point((struct tg_point){ x, y });
     }
     return 0;
@@ -232,6 +313,132 @@ static struct tg_geom *tg_poly_from_geos(GEOSContextHandle_t handle,
     return (struct tg_geom*)poly;
 }
 
+static struct tg_geom *tg_collection_from_geos(GEOSContextHandle_t handle,
+    const GEOSGeometry *geom, int geos_type)
+{
+    int ngeoms = GEOSGetNumGeometries_r(handle, geom);
+    if (ngeoms < 0 ||
+        (size_t)ngeoms > (size_t)-1 / sizeof(struct tg_geom*))
+    {
+        return 0;
+    }
+    if (ngeoms == 0) {
+        switch (geos_type) {
+        case GEOS_MULTIPOINT:
+            return tg_geom_new_multipoint_empty();
+        case GEOS_MULTILINESTRING:
+            return tg_geom_new_multilinestring_empty();
+        case GEOS_MULTIPOLYGON:
+            return tg_geom_new_multipolygon_empty();
+        default:
+            return tg_geom_new_geometrycollection_empty();
+        }
+    }
+
+    struct tg_geom **parts = tg_malloc((size_t)ngeoms * sizeof(struct tg_geom*));
+    if (!parts) {
+        return 0;
+    }
+    int i = 0;
+    for (; i < ngeoms; i++) {
+        const GEOSGeometry *part = GEOSGetGeometryN_r(handle, geom, i);
+        if (!part || GEOSGeom_getCoordinateDimension_r(handle, part) != 2) {
+            break;
+        }
+        if (geos_type != GEOS_GEOMETRYCOLLECTION &&
+            GEOSisEmpty_r(handle, part) != 0)
+        {
+            break;
+        }
+        parts[i] = tg_geom_from_geos(handle, (GEOSGeometry*)part);
+        if (!parts[i]) {
+            break;
+        }
+    }
+    if (i != ngeoms) {
+        for (int j = 0; j < i; j++) {
+            tg_geom_free(parts[j]);
+        }
+        tg_free(parts);
+        return 0;
+    }
+
+    struct tg_geom *result = 0;
+    switch (geos_type) {
+    case GEOS_MULTIPOINT: {
+        if ((size_t)ngeoms > (size_t)-1 / sizeof(struct tg_point)) {
+            break;
+        }
+        struct tg_point *points = tg_malloc((size_t)ngeoms * sizeof(struct tg_point));
+        if (points) {
+            for (i = 0; i < ngeoms; i++) {
+                if (tg_geom_typeof(parts[i]) != TG_POINT ||
+                    tg_geom_is_empty(parts[i]))
+                {
+                    break;
+                }
+                points[i] = tg_geom_point(parts[i]);
+            }
+            if (i == ngeoms) {
+                result = tg_geom_new_multipoint(points, ngeoms);
+            }
+            tg_free(points);
+        }
+        break;
+    }
+    case GEOS_MULTILINESTRING: {
+        if ((size_t)ngeoms > (size_t)-1 / sizeof(struct tg_line*)) {
+            break;
+        }
+        const struct tg_line **lines =
+            tg_malloc((size_t)ngeoms * sizeof(struct tg_line*));
+        if (lines) {
+            for (i = 0; i < ngeoms; i++) {
+                if (tg_geom_typeof(parts[i]) != TG_LINESTRING) {
+                    break;
+                }
+                lines[i] = tg_geom_line(parts[i]);
+            }
+            if (i == ngeoms) {
+                result = tg_geom_new_multilinestring(lines, ngeoms);
+            }
+            tg_free(lines);
+        }
+        break;
+    }
+    case GEOS_MULTIPOLYGON: {
+        if ((size_t)ngeoms > (size_t)-1 / sizeof(struct tg_poly*)) {
+            break;
+        }
+        const struct tg_poly **polys =
+            tg_malloc((size_t)ngeoms * sizeof(struct tg_poly*));
+        if (polys) {
+            for (i = 0; i < ngeoms; i++) {
+                if (tg_geom_typeof(parts[i]) != TG_POLYGON) {
+                    break;
+                }
+                polys[i] = tg_geom_poly(parts[i]);
+            }
+            if (i == ngeoms) {
+                result = tg_geom_new_multipolygon(polys, ngeoms);
+            }
+            tg_free(polys);
+        }
+        break;
+    }
+    default:
+        result = tg_geom_new_geometrycollection(
+            (const struct tg_geom *const*)parts, ngeoms);
+        break;
+    }
+
+    for (i = 0; i < ngeoms; i++) {
+        tg_geom_free(parts[i]);
+    }
+    tg_free(parts);
+    return result;
+}
+
 /// Convert a TG geometry to a GEOS geometry
 struct tg_geom *tg_geom_from_geos(GEOSContextHandle_t handle,
     GEOSGeometry *geom)
@@ -240,7 +447,7 @@ struct tg_geom *tg_geom_from_geos(GEOSContextHandle_t handle,
         return 0;
     }
     if (!GEOSisEmpty_r(handle, geom) && 
-        GEOSGeom_getDimensions_r(handle, geom) == 2)
+        GEOSGeom_getCoordinateDimension_r(handle, geom) == 2)
     {
         switch (GEOSGeomTypeId_r(handle, geom)) {
         case GEOS_POINT:
@@ -249,6 +456,12 @@ struct tg_geom *tg_geom_from_geos(GEOSContextHandle_t handle,
             return tg_line_from_geos(handle, geom);
         case GEOS_POLYGON:
             return tg_poly_from_geos(handle, geom);
+        case GEOS_MULTIPOINT:
+        case GEOS_MULTILINESTRING:
+        case GEOS_MULTIPOLYGON:
+        case GEOS_GEOMETRYCOLLECTION:
+            return tg_collection_from_geos(
+                handle, geom, GEOSGeomTypeId_r(handle, geom));
         default:
             break;
         }
