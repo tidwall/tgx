@@ -105,6 +105,52 @@ static void test_geojson_dir(void) {
     assert(tmallocs == 0);
 }
 
+// parse a wkt using TG, convert to geos and back to TG, perform wkbs of before
+// after geos<->tg conversion
+static void proc_conv(const char *wkt) {
+    // printf("%s\n", wkt);
+    uint8_t wkb1[512];
+    uint8_t wkb2[512];
+    struct tg_geom *g1 = tg_parse(wkt, strlen(wkt));
+    // printf("   A %s\n", tg_geom_error(g1));
+    assert(!tg_geom_error(g1));
+    size_t n1 = tg_geom_wkb(g1, wkb1, sizeof(wkb1));
+    GEOSContextHandle_t handle = GEOS_init_r();
+    assert(handle);
+    GEOSGeometry *gg = tg_geom_to_geos(handle, g1);
+    assert(gg);
+    struct tg_geom *g2 = tg_geom_from_geos(handle, gg);
+    assert(!tg_geom_error(g2));
+    GEOS_finish_r(handle);
+    size_t n2 = tg_geom_wkb(g2, wkb2, sizeof(wkb2));
+    tg_geom_free(g2);
+    tg_geom_free(g1);
+    assert(n1 <= sizeof(wkb1));
+    assert(n2 <= sizeof(wkb2));
+    assert(n1 == n2);
+    assert(memcmp(wkb1, wkb2, n1) == 0);
+}
+
+static void test_various_conversions(void) {
+    proc_conv("POINT(1 2)");
+    proc_conv("POINT EMPTY");
+    proc_conv("LINESTRING EMPTY");
+    proc_conv("LINESTRING(1 2,3 4)");
+    proc_conv("POLYGON EMPTY");
+    proc_conv("POLYGON((1 2,3 4,5 6,1 2))");
+    proc_conv("POLYGON((10 20,30 40,50 60,10 20),(1 2,3 4,5 6,1 2))");
+    proc_conv("MULTIPOINT EMPTY");
+    proc_conv("MULTIPOINT(1 2,3 4)");
+    proc_conv("MULTILINESTRING EMPTY");
+    proc_conv("MULTILINESTRING((1 2,3 4),(5 6,7 8))");
+    proc_conv("MULTIPOLYGON EMPTY");
+    proc_conv("MULTIPOLYGON(((1 2,3 4,5 6,1 2)))");
+    proc_conv("MULTIPOLYGON(((10 20,30 40,50 60,10 20),(1 2,3 4,5 6,1 2)),((1 2,3 4,5 6,1 2)))");
+    proc_conv("GEOMETRYCOLLECTION EMPTY");
+    proc_conv("GEOMETRYCOLLECTION(POINT(1 2))");
+    proc_conv("GEOMETRYCOLLECTION(POINT(1 2),MULTIPOINT(1 2,3 4),MULTIPOLYGON(((1 2,3 4,5 6,1 2))))");
+    assert(tmallocs == 0);
+}
 
 void print_geojson(struct tg_geom *geom) {
     size_t n = tg_geom_geojson(geom, 0, 0);
@@ -119,133 +165,6 @@ int main(int argc, char *argv[]) {
     (void)argc, (void)argv;
     tg_env_set_allocator(xmalloc, xrealloc, xfree);
     test_geojson_dir();
-
-
-
-
-
-    // char *gstr = read_testfile("tempe.geojson");
-    // // char *gstr = 
-    // // "{\"type\":\"Polygon\",\"coordinates\":[["
-    // // "[-112.5954,32.7146],[-112.5954,32.7143],[-112.5949,32.7143],"
-    // // "[-112.5949,32.7146],[-112.5954,32.7146]"
-    // // "]]}";
-    // // "{\"type\":\"LineString\",\"coordinates\":["
-    // // "[-112.5954,32.7146],[-112.5949,32.7143]"
-    // // "]}";
-    // // "{\"type\":\"Point\",\"coordinates\":[-112.5954,32.7146]}";
-    
-
-    // double meters = 10;
-
-    // struct tg_geom *geom = tg_parse(gstr, strlen(gstr));
-    // assert(!tg_geom_error(geom));
-    // // free(gstr);
-
-    // // {
-    // //     struct tg_point center = tg_geom_point(geom);
-    // //     struct tg_geom *gm = tg_geom_to_meters_grid(geom, center);
-    // //     // struct tg_geom *gr = tg_geom_buffer(gm, 10, 20);
-    // //     struct tg_geom *gg = tg_geom_from_meters_grid(gr, center);
-
-
-        
-    // //     // 
-    // //     print_geojson(gg);
-    // //     exit(0);
-    // // }
-
-    // struct tg_point origin = tg_geom_point(geom);
-    // // struct tg_point origin = { -112.59515,32.71445 };
-
-    // struct tg_geom *geom2 = tg_geom_to_meters_grid(geom, origin);
-    // assert(!tg_geom_error(geom2));
-
-    // GEOSContextHandle_t handle = GEOS_init_r();
-    // GEOSGeometry *ggeom = tg_geom_to_geos(handle, geom2);
-    // assert(ggeom);
-    // GEOSGeometry *ggeom2 = GEOSBuffer_r(handle, ggeom, 1000, 20);
-    // GEOSGeom_destroy_r(handle, ggeom);
-    // assert(ggeom2);
-    // struct tg_geom *geom3 = tg_geom_from_geos(handle, ggeom2);
-    // GEOSGeom_destroy_r(handle, ggeom2);
-    // GEOS_finish_r(handle);
-    // assert(!tg_geom_error(geom3));
-    
-
-
-    // struct tg_geom *geom4 = tg_geom_from_meters_grid(geom3, origin);
-    // assert(!tg_geom_error(geom4));
-    // // printf("{\"type\":\"GeometryCollection\",\"geometries\":[\n");
-    // // print_geojson(geom);
-    // // printf(",");
-    // // print_geojson(tg_geom_new_point(origin));
-    // // printf(",");
-    // // print_geojson(geom4);
-    // // printf("]}\n");
-    
-
-
-    // {
-    // // Parse the geojson and convert from lat/lon to meters.
-    // struct tg_geom *tg_geom = tg_parse_geojson(gstr);
-    // struct tg_point origin = tg_geom_point(tg_geom);
-    // struct tg_geom *tg_meters = tg_geom_to_meters_grid(tg_geom, origin);
-
-    // // Convert TG geometry to GEOS geometry
-    // GEOSContextHandle_t handle = GEOS_init_r();
-    // GEOSGeometry *geos_geom = tg_geom_to_geos(handle, tg_meters);
-
-    // // Buffer the geometry using the GEOS buffer operation. 
-    // // The width is 1000 meters.
-    // GEOSGeometry *geos_buffered = GEOSBuffer_r(handle, geos_geom, 1000, 20);
-
-    // // Convert back to TG from GEOS
-    // struct tg_geom *tg_buffered = tg_geom_from_geos(handle, geos_buffered);
-
-    // // Convert back to lat/lon.
-    // // This is the final result.
-    // struct tg_geom *tg_final = tg_geom_from_meters_grid(tg_buffered, origin);
-
-
-
-    // // Finally, cleanup resources
-    // GEOSGeom_destroy_r(handle, geos_buffered);
-    // GEOSGeom_destroy_r(handle, geos_geom);
-    // GEOS_finish_r(handle);
-    
-    // tg_geom_free(tg_buffered);
-    // tg_geom_free(tg_meters);
-    // tg_geom_free(tg_geom);
-    // tg_geom_free(tg_final);
-
-
-
-    // }
-
-
-    // // // tg_parse_geojson
-    // // GEOSContextHandle_t handle = GEOS_init_r();
-    // // char *gstr = read_testfile("point.geojson");
-    // // struct tg_geom *tgeom = tg_parse(gstr, strlen(gstr));
-    // // free(gstr);
-    // // assert(!tg_geom_error(tgeom));
-    // // GEOSGeometry *ggeom = tg_to_geos(handle, tgeom);
-    // // tg_geom_free(tgeom);
-    // // assert(ggeom);
-
-    // // GEOSGeometry *ggeom2 = GEOSBuffer_r(handle, ggeom, 10, 10);
-    // // GEOSGeom_destroy_r(handle, ggeom);
-    // // assert(ggeom2);
-    // // struct tg_geom *tgeom2 = tg_from_geos(handle, ggeom2);
-    // // GEOSGeom_destroy_r(handle, ggeom2);
-    // // GEOS_finish_r(handle);
-    // // assert(!tg_geom_error(tgeom2));
-
-    // // char output[4096];
-    // // tg_geom_geojson(tgeom2, output, sizeof(output));
-    // // tg_geom_free(tgeom2);
-    // // printf("%s\n", output);
-
+    test_various_conversions();
     return 0;
 }
